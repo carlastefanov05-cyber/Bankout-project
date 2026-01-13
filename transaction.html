@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Bankout - Transactions</title>
+    <style>
+        body { font-family: 'Inter', sans-serif; padding: 40px; background: #f4f7f6; }
+        .card { max-width: 400px; margin: auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        select, input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+        .btn-send { width: 100%; padding: 15px; background: #8da18d; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 700; }
+        .btn-back { width: 100%; background: none; border: none; color: #666; margin-top: 10px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>New Transaction</h2>
+        <select id="type" onchange="toggleRecipient()">
+            <option value="deposit">Deposit</option>
+            <option value="withdraw">Withdraw</option>
+            <option value="transfer">Transfer</option>
+        </select>
+
+        <input type="number" id="amount" placeholder="Amount ($)" min="1">
+        
+        <div id="recipient-div" style="display:none;">
+            <input type="text" id="recipient" placeholder="Recipient Username">
+        </div>
+
+        <button class="btn-send" onclick="handleTransaction()">Confirm Transaction</button>
+        <button class="btn-back" onclick="window.location.href='dashboard.html'">Cancel</button>
+    </div>
+
+    <script>
+
+        let currentUsername = localStorage.getItem('username');
+        let currentUserId = localStorage.getItem('userId');
+
+        async function recoverSession() {
+            let username = localStorage.getItem("username");
+            let userId = localStorage.getItem("userId");
+
+            if (!username || username === "undefined") {
+                alert("No session found. Please log in.");
+                window.location.href = "loginmenu.html";
+                throw new Error("No session");
+            }
+
+            if (userId && userId !== "undefined") {
+                return userId;
+            }
+
+            const res = await fetch(`http://localhost:8080/users/profile/${username}`);
+            if (!res.ok) throw new Error("Could not recover user");
+
+            const user = await res.json();
+            localStorage.setItem("userId", user.id);
+
+            return user.id;
+        }
+
+
+        recoverSession();
+
+        function toggleRecipient() {
+            const type = document.getElementById('type').value;
+            document.getElementById('recipient-div').style.display = (type === 'transfer') ? 'block' : 'none';
+        }
+
+        async function handleTransaction() {
+            let userId;
+
+            try {
+                userId = await recoverSession();   
+            } catch {
+                return;
+            }
+
+            const type = document.getElementById("type").value;
+            const amount = parseFloat(document.getElementById("amount").value);
+
+            if (isNaN(amount) || amount <= 0) {
+                alert("Invalid amount");
+                return;
+            }
+
+            let endpoint = `http://localhost:8080/transactions/${type}`;
+            let bodyData = { userId: userId, amount: amount };
+
+            if (type === "transfer") {
+                const recipientName = document.getElementById("recipient").value;
+                const res = await fetch(`http://localhost:8080/users/profile/${recipientName}`);
+                if (!res.ok) {
+                    alert("Recipient not found");
+                    return;
+                }
+                const recipient = await res.json();
+                bodyData = {
+                    senderId: userId,
+                    receiverId: recipient.id,
+                    amount: amount
+                };
+            }
+
+            const response = await fetch(endpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(bodyData)
+            });
+
+            if (response.ok) {
+                alert("Transaction successful");
+
+
+                if (amount > 10000) {
+                    console.log("Triggering suspicious activity alert...");
+                    await triggerAlert('suspicious', userId);
+                }
+
+
+                const profileRes = await fetch(`http://localhost:8080/users/profile/${currentUsername}`);
+                if (profileRes.ok) {
+                    const user = await profileRes.json();
+                    if (user.balance < 50) {
+                        console.log("Triggering low balance alert...");
+                        await triggerAlert('lowbalance', userId);
+                    }
+                }
+                
+
+                window.location.href = "dashboard.html";
+            } else {
+                alert(await response.text());
+            }
+        }
+
+
+        async function triggerAlert(alertType, id) {
+            try {
+                await fetch(`http://localhost:8080/alerts/${alertType}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId: id })
+                });
+            } catch (err) {
+                console.error("Alert failed to send", err);
+            }
+        }
+    </script>
+</body>
+</html>
